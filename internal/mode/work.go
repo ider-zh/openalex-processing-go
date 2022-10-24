@@ -8,7 +8,7 @@ type WorkSource struct {
 	// authorships
 	AuthorShips []struct {
 		Author struct {
-			ID string `json:"id"`
+			ID interface{} `json:"id"` //may be string or int
 		} `json:"author"`
 		Institutions []struct {
 			ID          string `json:"id"`
@@ -23,7 +23,7 @@ type WorkSource struct {
 type WorkMongo struct {
 	ID      int64   `bson:"_id"`
 	Year    int32   `bson:"year"`
-	In      []int64 `bson:"in"`
-	Out     []int64 `bson:"out"`
+	In      []int64 `bson:"in,omitempty"`
+	Out     []int64 `bson:"out,omitempty"`
 	Country string  `bson:"country,omitempty"`
 }

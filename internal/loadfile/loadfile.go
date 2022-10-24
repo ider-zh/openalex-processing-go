@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"compress/gzip"
 	"encoding/json"
+	"fmt"
+	"io"
 	"io/fs"
 	"openalex/internal/mode"
 	"os"
@@ -16,8 +18,8 @@ import (
 
 var (
 	basicPath   = "/home/ni/data/openAlex/data"
-	processCout = 1
-	MergeIDs    = NewMergeIDS()
+	processCout = 30
+	DocSumCount int64
 )
 
 type Base interface {
@@ -48,38 +50,46 @@ func iteratePath[T Base](c T) (retPathStrs []string) {
 		return err
 	})
 	// log.Println(retPathStrs)
+	fmt.Printf("files count: %v\n", len(retPathStrs))
 	return
 }
 
-func worker[T Base, S SourceGeneric](c T, paths <-chan string, results chan<- S, wg *sync.WaitGroup, piplines []func(S)) {
+func worker[T Base, S SourceGeneric](c T, paths <-chan string, results chan<- S, wg *sync.WaitGroup) {
 	for filePath := range paths {
 		f, err := os.Open(filePath)
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer f.Close()
 		gr, err := gzip.NewReader(f)
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer gr.Close()
 
-		scanner := bufio.NewScanner(gr)
-		for scanner.Scan() {
+		scanner := bufio.NewReader(gr)
+		i := 0
+		for {
+			i += 1
+			line, err := scanner.ReadString('\n')
+
+			if err == io.EOF {
+				break
+			}
 			var item S
-			json.Unmarshal(scanner.Bytes(), &item)
-
-			for _, fc := range piplines {
-				fc(item)
+			err = json.Unmarshal([]byte(line), &item)
+			if err != nil {
+				log.Println(err, filePath, string(line))
 			}
 			results <- item
 		}
-		// break
+
+		gr.Close()
+		f.Close()
+		// log.Println("path done:", filePath, " ", i)
 	}
 	wg.Done()
 }
 
-func extracting[T Base, S SourceGeneric](c T, baseChan chan S, piplines []func(S)) {
+func extracting[T Base, S SourceGeneric](c T, baseChan chan S) {
 
 	// 99999 is enough size
 	pathChan := make(chan string, 99999)
@@ -93,28 +103,28 @@ func extracting[T Base, S SourceGeneric](c T, baseChan chan S, piplines []func(S
 
 	// worker
 	wg := sync.WaitGroup{}
-	wg.Add(processCout)
 	for w := 0; w < processCout; w++ {
-		go worker(c, pathChan, baseChan, &wg, piplines)
+		wg.Add(1)
+		go worker(c, pathChan, baseChan, &wg)
 	}
 
 	// consumer
-	go func() {
-		for item := range baseChan {
-			log.Println(item)
-		}
-	}()
+	// go func() {
+	// 	for item := range baseChan {
+	// 		log.Println(item)
+	// 	}
+	// }()
 
 	wg.Wait()
 	close(baseChan)
 
 }
 
-func ExtractingWork(piplines []func(mode.WorkSource)) (baseChan chan mode.WorkSource) {
+func ExtractingWork() (baseChan chan mode.WorkSource) {
 	baseChan = make(chan mode.WorkSource, processCout*10)
 	wk := &Work{}
 	// Test(wk)
-	go extracting[*Work, mode.WorkSource](wk, baseChan, piplines)
+	go extracting[*Work, mode.WorkSource](wk, baseChan)
 	return
 }
 

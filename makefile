@@ -1,2 +1,2 @@
 test:
-	go test -timeout 3s  ./... -v
+	go test -timeout 120s  ./... -v
