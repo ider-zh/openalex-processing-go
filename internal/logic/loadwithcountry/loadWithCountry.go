@@ -6,18 +6,25 @@ import (
 	"encoding/json"
 	"openalex/internal/loadfile"
 	"openalex/internal/mode"
+	"openalex/internal/worktype"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/monitor1379/yagods/sets/hashset"
 	log "github.com/sirupsen/logrus"
 
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // dump reference to mongo, add paper country
+type conceptItem struct {
+	ID    string `json:"id"`
+	Level int32  `json:"level"`
+}
 
 func Main() {
 	// country iso name map
@@ -90,11 +97,16 @@ func Main() {
 
 	MergeIDs := loadfile.NewMergeIDS()
 	WorksSet := MergeIDs.IDMAP["works"]
+
+	// load work types
+	WorkTypeConvert := worktype.NewWorkType()
+	defer WorkTypeConvert.Dump()
+
 	// load works
 
 	chanOut := make(chan *mode.WorkMongo, 1000)
 
-	var handlePipeLine = func(s mode.WorkSource) {
+	var handlePipeLine = func(s *mode.WorkSource) {
 		IDs := strings.Split(s.ID, "/")
 		ID, err := strconv.ParseInt(IDs[len(IDs)-1][1:], 10, 64)
 		if err != nil {
@@ -103,27 +115,40 @@ func Main() {
 		if WorksSet.Contains(ID) {
 			return
 		}
-
-		countryCode := ""
-	FindCountry:
+		countryCodeSet := hashset.New[string]()
 		for _, obj := range s.AuthorShips {
+		FindCountry:
 			for _, ins := range obj.Institutions {
 				if ins.CountryCode != "" {
-					countryCode = ins.CountryCode
+					countryCodeSet.Add(ins.CountryCode)
 					break FindCountry
 				}
-				var ok bool
-				if countryCode, ok = ORG_COUNTRY_MAP[ins.Name]; ok {
+
+				if subCountryCode, ok := ORG_COUNTRY_MAP[ins.Name]; ok {
+					countryCodeSet.Add(subCountryCode)
 					break FindCountry
 				}
 			}
 		}
+
+		countryCode := countryCodeSet.Values()
 		dataOut := mode.WorkMongo{
-			ID:   ID,
-			Year: s.Year,
+			ID:      ID,
+			Year:    s.Year,
+			TypeStr: strings.TrimSpace(s.Type),
 		}
-		if countryCode != "" {
+		if len(countryCode) > 0 {
 			dataOut.Country = countryCode
+		}
+
+		for _, item := range s.Concepts {
+			// format ID
+			IDs := strings.Split(item.ID, "/")
+			IDInt64, err := strconv.ParseInt(IDs[len(IDs)-1][1:], 10, 64)
+			if err != nil {
+				log.Fatal(err)
+			}
+			dataOut.Concept = append(dataOut.Concept, mode.WorkMongoConcepts{ID: IDInt64, Level: item.Level})
 		}
 
 		idOuts := []int64{}
@@ -165,21 +190,19 @@ func Main() {
 		// handle linsin
 		inMap := make(map[int64][]int64)
 		allMap := make(map[int64]*mode.WorkMongo)
-		// testCount := 0
+
 		allHandleOut := 0
 		for item := range chanOut {
 			allHandleOut += 1
-			// testCount += 1
-			// if testCount > 100000 {
-			// 	break
-			// }
 			allMap[item.ID] = item
+
+			// buid in id
 			for _, outID := range item.Out {
 				inMap[outID] = append(inMap[outID], item.ID)
 			}
 		}
-
 		log.Println("all allHandleOut count:", allHandleOut)
+
 		Client, err := mongo.NewClient(options.Client().ApplyURI("mongodb://knogen:knogen@127.0.0.1:27017"))
 		// ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		ctx := context.Background()
@@ -190,6 +213,24 @@ func Main() {
 		}
 
 		collection := Client.Database("openalex").Collection("works")
+		indexModels := []mongo.IndexModel{
+			{
+				Keys: bson.D{{Key: "year", Value: 1}}, Options: options.Index().SetBackground(true),
+			},
+			{
+				Keys: bson.D{{Key: "type", Value: 1}}, Options: options.Index().SetBackground(true),
+			},
+			{
+				Keys: bson.D{{Key: "country", Value: 1}}, Options: options.Index().SetBackground(true),
+			},
+			{
+				Keys: bson.D{{Key: "year", Value: 1}, {Key: "country", Value: 1}}, Options: options.Index().SetBackground(true),
+			},
+			{
+				Keys: bson.D{{Key: "year", Value: 1}, {Key: "type", Value: 1}, {Key: "country", Value: 1}}, Options: options.Index().SetBackground(true),
+			},
+		}
+		collection.Indexes().CreateMany(ctx, indexModels)
 
 		opts := options.BulkWrite().SetOrdered(false)
 		models := []mongo.WriteModel{}
@@ -199,9 +240,12 @@ func Main() {
 			if In, ok := inMap[allMap[k].ID]; ok {
 				allMap[k].In = In
 			}
+			// work type convert
+			allMap[k].Type = WorkTypeConvert.GetTypeID(allMap[k].TypeStr)
+
 			i += 1
 			models = append(models, mongo.NewInsertOneModel().SetDocument(allMap[k]))
-			if i%10000 == 0 {
+			if i%50000 == 0 {
 				log.Println("insert to mongo")
 				_, err := collection.BulkWrite(ctx, models, opts)
 				if err != nil {
@@ -217,6 +261,7 @@ func Main() {
 				log.Println("bulk upsert fail", err)
 			}
 		}
+		// dump work type
 		wgLast.Done()
 	}()
 	wg.Wait()

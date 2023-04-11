@@ -1,52 +1,51 @@
-package loadfile_test
+package loadfile
 
 import (
-	"bufio"
-	"compress/gzip"
-	"encoding/json"
-	"io"
-	"os"
 	"testing"
-
 	// . "openalex/internal/loadfile"
-	"openalex/internal/mode"
-
-	log "github.com/sirupsen/logrus"
 )
 
-func TestLogic(t *testing.T) {
-	filePath := "/home/ni/data/openAlex/data/works/updated_date=2022-08-04/part_002.gz"
-	f, err := os.Open(filePath)
-	if err != nil {
-		log.Fatal(err)
+func TestGetPathOrder(t *testing.T) {
+	wk := &Work{}
+	iteratePath(wk)
+	for _, path := range iteratePath(wk) {
+		t.Log(path)
 	}
-	gr, err := gzip.NewReader(f)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	reader := bufio.NewReader(gr)
-
-	i := 0
-	for {
-		i += 1
-		line, err := reader.ReadString('\n')
-
-		if err == io.EOF {
-			break
-		}
-		var item mode.WorkSource
-		err = json.Unmarshal([]byte(line), &item)
-		if err != nil {
-			log.Println(err, filePath, string(line))
-		}
-
-	}
-
-	gr.Close()
-	f.Close()
-	log.Println("path done:", filePath, " ", i)
 }
+
+// func TestLogic(t *testing.T) {
+// 	filePath := "/home/ni/data/openAlex/data/works/updated_date=2022-08-04/part_002.gz"
+// 	f, err := os.Open(filePath)
+// 	if err != nil {
+// 		log.Fatal(err)
+// 	}
+// 	gr, err := gzip.NewReader(f)
+// 	if err != nil {
+// 		log.Fatal(err)
+// 	}
+
+// 	reader := bufio.NewReader(gr)
+
+// 	i := 0
+// 	for {
+// 		i += 1
+// 		line, err := reader.ReadString('\n')
+
+// 		if err == io.EOF {
+// 			break
+// 		}
+// 		var item mode.WorkSource
+// 		err = json.Unmarshal([]byte(line), &item)
+// 		if err != nil {
+// 			log.Println(err, filePath, string(line))
+// 		}
+
+// 	}
+
+// 	gr.Close()
+// 	f.Close()
+// 	log.Println("path done:", filePath, " ", i)
+// }
 
 // func TestWorks(t *testing.T) {
 // 	// F1 := "a1"

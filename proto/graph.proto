@@ -1,0 +1,42 @@
+syntax = "proto3";
+ 
+//包名，通过protoc生成时go文件时
+package graphtool;
+option go_package = "./graphtool";
+
+//边
+message Edge {
+     int64 sourceID = 1;
+     int64 targetID = 2;
+}
+ 
+//边集合
+message Graph {
+    repeated Edge edges = 1;
+}
+
+//返回矩阵
+
+message FrequencyItem {
+    repeated int64 values = 1;
+}
+
+message GraphStats {
+    int64 edgeCount = 1;
+    int64 nodeCount = 2;
+    int64 pathCount = 3;
+    int64 distanceCount = 4;
+    // average shorests distance
+    double ASD = 5;
+    // cal average shorests distance flag, if the graph node more than 1 millior, it will not cal ASD
+    bool EnableAsd = 6;
+    // clustering coefficient
+    double CC = 7;
+    repeated FrequencyItem frequency = 8;
+}
+
+
+// 定义接口HelloService
+service DirectGraphDistanceService {
+    rpc DirectGraphDistance (Graph) returns (GraphStats);
+}
